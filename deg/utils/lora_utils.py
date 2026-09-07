@@ -14,16 +14,17 @@ class LoRALinear(nn.Module):
         if self.linear.bias is not None:
             self.linear.bias.requires_grad = False
             
-        # ─── FIX: Ensure LoRA parameters are created on the exact same device as the base layer! ───
+        # ─── FIX: Match BOTH device AND dtype of the base layer! ───
         device = linear.weight.device
+        dtype = linear.weight.dtype  # This will be torch.float16 for TripoSplat
         
-        # LoRA parameters
-        self.lora_A = nn.Parameter(torch.zeros(rank, linear.in_features, device=device))
-        self.lora_B = nn.Parameter(torch.zeros(linear.out_features, rank, device=device))
+        # Initialize A in fp32 for numerical stability during init, then cast to target dtype
+        lora_A_init = torch.zeros(rank, linear.in_features, device=device)
+        nn.init.kaiming_uniform_(lora_A_init, a=5**0.5)
+        self.lora_A = nn.Parameter(lora_A_init.to(dtype=dtype))
         
-        # Initialize
-        nn.init.kaiming_uniform_(self.lora_A, a=5**0.5)
-        nn.init.zeros_(self.lora_B)
+        # B is zero-initialized, so direct dtype casting is perfectly safe
+        self.lora_B = nn.Parameter(torch.zeros(linear.out_features, rank, device=device, dtype=dtype))
 
     def forward(self, x):
         return self.linear(x) + self.alpha * (x @ self.lora_A.T @ self.lora_B.T)
