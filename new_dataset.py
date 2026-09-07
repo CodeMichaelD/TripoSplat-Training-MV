@@ -256,9 +256,9 @@ if old_import in content:
     content = content.replace(old_import, new_import)
     with open(build_meta_path, "w") as f:
         f.write(content)
-    print("✅ Patched build_metadata.py to use custom.py")
+    print(" Patched build_metadata.py to use custom.py")
 else:
-    print("⚠️ build_metadata.py already patched or line not found")
+    print(" build_metadata.py already patched or line not found")
 
 # ==========================================
 # 3. RUN TRIPOSPLAT TOOLKIT PIPELINE
@@ -297,7 +297,7 @@ subprocess.run([
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
 
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
-# Run with captured output to see errors
+# Use check=False so we can inspect output even if it fails
 proc = subprocess.run([
     "python", "dataset_toolkits/encode_latentsequence.py",
     "--output_dir", OUT_DIR,
@@ -305,15 +305,30 @@ proc = subprocess.run([
     "--filter_low_aesthetic_score", "0.0"
 ], capture_output=True, text=True)
 
+# Always print the output, because even on success there may be hidden errors
+print("=== LATENT ENCODING STDOUT ===")
+print(proc.stdout)
+print("=== LATENT ENCODING STDERR ===")
+print(proc.stderr)
+
 if proc.returncode != 0:
-    print("❌ Latent encoding failed!")
+    raise RuntimeError(f"Latent encoding subprocess failed with code {proc.returncode}")
+
+# Check if files were created
+latent_dir = os.path.join(OUT_DIR, "latents", "triposplat_vae_encoder_fp16")
+if not os.path.exists(latent_dir):
+    raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding likely failed silently.")
+npz_files = [f for f in os.listdir(latent_dir) if f.endswith('.npz')]
+if len(npz_files) == 0:
+    # If no files, print the captured output again and raise
+    print(" No latent .npz files found. Full output:")
     print("=== STDOUT ===")
     print(proc.stdout)
     print("=== STDERR ===")
     print(proc.stderr)
-    raise RuntimeError("Latent encoding subprocess failed")
-
-print("Latent encoding completed successfully.")
+    raise RuntimeError(f"No latent .npz files found in {latent_dir}. Encoding may have failed silently.")
+else:
+    print(f" Found {len(npz_files)} latent files.")
 
 # Verify that .npz files were created
 latent_dir = os.path.join(OUT_DIR, "latents", "triposplat_vae_encoder_fp16")
@@ -322,7 +337,7 @@ if os.path.exists(latent_dir):
     if len(npz_files) == 0:
         raise RuntimeError(f"No latent .npz files found in {latent_dir}. Encoding may have failed silently.")
     else:
-        print(f"✅ Found {len(npz_files)} latent files.")
+        print(f" Found {len(npz_files)} latent files.")
 else:
     raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding failed.")
 
