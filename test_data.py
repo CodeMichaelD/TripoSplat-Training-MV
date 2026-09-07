@@ -24,15 +24,22 @@ print(" Building Model...")
 model = getattr(models, cfg.models.denoiser.name)(**cfg.models.denoiser.args).cuda()
 
 print(" Bypassing ALL zero-init barriers for gradient test...")
-# Barrier 1: out_layer
+# 1. out_layer
 model.out_layer.weight.data.normal_(std=0.02)
-# Barrier 2: adaLN modulation in target blocks
+
+# 2. Shared adaLN modulation (CRUCIAL FIX: The 1k config uses share_mod=True)
+if hasattr(model, 'adaLN_modulation') and model.adaLN_modulation is not None:
+    model.adaLN_modulation[-1].weight.data.normal_(std=0.02)
+    model.adaLN_modulation[-1].bias.data.normal_(std=0.02)
+
+# 3. Block-level adaLN (Fallback just in case share_mod=False)
 for idx in [20, 21, 22, 23]:
     block = model.blocks[idx]
-    if hasattr(block, 'adaLN_modulation'):
+    if hasattr(block, 'adaLN_modulation') and block.adaLN_modulation is not None:
         block.adaLN_modulation[-1].weight.data.normal_(std=0.02)
-        block.adaLN_modulation[-1].bias.data.zero_()
-# Barrier 3: ctrl_embedder
+        block.adaLN_modulation[-1].bias.data.normal_(std=0.02)
+
+# 4. ctrl_embedder
 if hasattr(model, 'ctrl_embedder') and model.ctrl_embedder is not None:
     model.ctrl_embedder.weight.data.normal_(std=0.02)
 
@@ -77,7 +84,6 @@ out = model(dummy_x, t, dummy_cond, ctrl_tokens=dummy_ctrl_tokens)
 loss = out['latent'].float().mean()
 loss.backward()
 
-# Check ALL trainable parameters for gradients
 print("\n Gradient Report:")
 lora_A_ok = False
 lora_B_ok = False
@@ -87,29 +93,22 @@ for name, p in model.named_parameters():
     if not p.requires_grad:
         continue
     has_grad = p.grad is not None and p.grad.abs().sum() > 0
-    grad_sum = p.grad.abs().sum().item() if p.grad is not None else 0.0
     
     if 'lora_A' in name:
         lora_A_ok = lora_A_ok or has_grad
-        if has_grad:
-            print(f"   {name}: grad_sum={grad_sum:.6f}")
     elif 'lora_B' in name:
         lora_B_ok = lora_B_ok or has_grad
-        if has_grad:
-            print(f"   {name}: grad_sum={grad_sum:.6f}")
     elif 'ctrl_embedder' in name:
         ctrl_ok = ctrl_ok or has_grad
-        if has_grad:
-            print(f"   {name}: grad_sum={grad_sum:.6f}")
-
-if not lora_A_ok and not lora_B_ok and not ctrl_ok:
-    print("   No gradients found in ANY trainable parameter!")
 
 print("\n" + "="*50)
 if lora_A_ok and lora_B_ok:
     print(" SUCCESS: LoRA gradients flowing correctly!")
 else:
     print(f" lora_A grads: {lora_A_ok}, lora_B grads: {lora_B_ok}, ctrl grads: {ctrl_ok}")
+
+if not ctrl_ok and hasattr(model, 'ctrl_embedder'):
+    print(" NOTE: ctrl_embedder has no gradients. This is expected if you haven't patched the `forward` method to use `ctrl_tokens` yet.")
 
 print(" Saving checkpoint...")
 lora_state = {}
