@@ -299,6 +299,14 @@ subprocess.run([
     "--num_pcds", "16384"
 ], check=True)
 
+# --- FIX: Merge pcd feature records into metadata.csv ---
+print(" Merging pcd feature records into metadata.csv...")
+subprocess.run([
+    "python", "dataset_toolkits/build_metadata.py", "custom",
+    "--output_dir", OUT_DIR
+], check=True)
+# --------------------------------------------------------
+
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
 subprocess.run([
     "python", "dataset_toolkits/encode_latentsequence.py",
