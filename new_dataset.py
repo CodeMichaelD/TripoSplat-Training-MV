@@ -28,8 +28,14 @@ CTRL_IMG_DIR = os.path.join(KAGGLE_INPUT_DIR, "ctrl_images")
 OUT_DIR = "/kaggle/working/triposplat_dataset"
 REPO_DIR = "/kaggle/working/TripoSplat-Training-MV"
 
+from kaggle_secrets import UserSecretsClient
+
+# Initialize the secrets client
+user_secrets = UserSecretsClient()
+
+# Retrieve your secret value using its label
+HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
 # Hugging Face Config
-HF_TOKEN = "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"  # <--- REPLACE WITH YOUR HF WRITE TOKEN
 HF_REPO_ID = "codemichaeld/triposplat-control-dataset" # <--- REPLACE WITH YOUR DESIRED HF REPO NAME
 
 # VAE Rendering Config
