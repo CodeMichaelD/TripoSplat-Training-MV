@@ -296,6 +296,9 @@ for _, row in tqdm(df.iterrows(), total=len(df), desc="Rendering meshes"):
     sha = row['sha256']
     mesh_path = os.path.join(OUT_DIR, row['local_path'])
     render_mesh_opengl_headless(mesh_path, OUT_DIR, sha, num_views=NUM_VIEWS)
+print(" Updating metadata.csv to mark rendering as complete...")
+df['rendered'] = True
+df.to_csv(os.path.join(OUT_DIR, "metadata.csv"), index=False)
 
 print(" Step 3: Extracting 3D Point Features (DINOv3)...")
 subprocess.run([
