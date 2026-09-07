@@ -1,4 +1,3 @@
-# test_dummy_lora.py
 import os
 import sys
 import torch
@@ -7,9 +6,8 @@ from easydict import EasyDict as edict
 from tensordict import TensorDict
 from safetensors.torch import save_file
 
-# Add repo to path
 sys.path.insert(0, "/kaggle/working/TripoSplat-Training-MV")
-os.environ["ATTN_BACKEND"] = "sdpa" # Bypass flash_attn compilation requirement
+os.environ["ATTN_BACKEND"] = "sdpa"
 
 from deg import models
 from deg.utils.lora_utils import inject_lora
@@ -19,19 +17,16 @@ with open("/kaggle/working/TripoSplat-Training-MV/configs/dit/latent1k-latentseq
     cfg = yaml.safe_load(f)
 
 cfg = edict(cfg)
-# Override for T4 VRAM safety
 cfg.models.denoiser.args.use_fp16 = True
-cfg.models.denoiser.args.ctrl_channels = 1280 # Match DINOv3 output
+cfg.models.denoiser.args.ctrl_channels = 1280
 
 print(" Building Model...")
 model = getattr(models, cfg.models.denoiser.name)(**cfg.models.denoiser.args).cuda()
 
-# ─── FIX: Bypass zero-init for the dummy test so gradients can flow on Step 0 ───
 print(" Bypassing zero-init for dummy gradient test...")
 model.out_layer.weight.data.normal_(std=0.02)
 if hasattr(model, 'ctrl_embedder') and model.ctrl_embedder is not None:
     model.ctrl_embedder.weight.data.normal_(std=0.02)
-# ────────────────────────────────────────────────────────────────────────────────
 
 print(" Injecting Control LoRA...")
 # 1. Freeze all base parameters
@@ -46,19 +41,17 @@ for p in model.ctrl_embedder.parameters():
     p.requires_grad = True
 
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f" Trainable parameters: {trainable_params:,} (Should be small!)")
+print(f" Trainable parameters: {trainable_params:,}")
 
 print(" Generating Dummy Batch...")
 B = 1
 L = 1024
 
-# The model expects float32 inputs and handles fp16 conversion internally!
 dummy_x = TensorDict({
     'latent': torch.randn(B, L, 16, device='cuda', dtype=torch.float32),
     'camera': torch.randn(B, 1, 5, device='cuda', dtype=torch.float32)
 }, batch_size=B)
 
-# The 1k config uses cond2_channels=128, so we MUST provide 'feature2'!
 dummy_cond = TensorDict({
     'feature1': torch.randn(B, 257, 1280, device='cuda', dtype=torch.float32),
     'feature2': torch.randn(B, 257, 128, device='cuda', dtype=torch.float32)
@@ -72,17 +65,17 @@ model.train()
 
 # Forward
 out = model(dummy_x, t, dummy_cond, ctrl_tokens=dummy_ctrl_tokens)
-
-# Cast to float32 before computing mean to avoid fp16 overflow/underflow
 loss = out['latent'].float().mean() 
 
 # Backward
 loss.backward()
 
-# Check gradients
+# ─── FIX: Check lora_B for gradients! ───
+# lora_A's gradient is mathematically zero on step 0 because lora_B is initialized to zero.
+# lora_B's gradient is non-zero because lora_A is non-zero.
 lora_grad_exists = False
 for name, p in model.named_parameters():
-    if 'lora_A' in name and p.grad is not None and p.grad.abs().sum() > 0:
+    if 'lora_B' in name and p.grad is not None and p.grad.abs().sum() > 0:
         lora_grad_exists = True
         break
 
