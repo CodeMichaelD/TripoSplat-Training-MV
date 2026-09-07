@@ -12,6 +12,7 @@ from huggingface_hub import HfApi, create_repo
 # ==========================================
 # 0. ENVIRONMENT SETUP FOR HEADLESS OPENGL
 # ==========================================
+os.environ["ATTN_BACKEND"] = "sdpa"
 # Set EGL platform for headless OpenGL rendering in Kaggle/GPU environments
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
