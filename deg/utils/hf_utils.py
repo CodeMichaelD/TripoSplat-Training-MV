@@ -12,7 +12,7 @@ DEFAULT_HF_VAE_DECODER_FILE = "vae/triposplat_vae_decoder_fp16.safetensors"
 DEFAULT_HF_CONFIG_FILE = "configs/dit/latent8k-cond1k-latentseq_flow_img_s3dit-L.yaml"
 DEFAULT_HF_DENOISER_PATH = f"hf://{DEFAULT_HF_REPO_ID}/{DEFAULT_HF_DENOISER_FILE}"
 DEFAULT_HF_VAE_ENCODER_PATH = f"hf://{DEFAULT_HF_REPO_ID}/{DEFAULT_HF_VAE_ENCODER_FILE}"
-DEFAULT_DINOV3_PATH = "facebook/dinov3-vith16plus-pretrain-lvd1689m"
+DEFAULT_DINOV3_PATH = "codemichaeld/dinov3h"
 DEFAULT_FLUX2_VAE_PATH = "black-forest-labs/FLUX.2-dev"
 
 def env_flag_enabled(name: str) -> bool:
