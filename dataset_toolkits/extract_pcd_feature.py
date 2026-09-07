@@ -87,15 +87,17 @@ if __name__ == '__main__':
     if opt.model == "flux1_dev_vae":
         from diffusers.models import AutoencoderKL
         encoder_model = AutoencoderKL.from_pretrained(
-            "black-forest-labs/FLUX.1-dev", subfolder="vae", torch_dtype=torch.bfloat16
+            "unsloth/FLUX.1-dev", subfolder="vae", torch_dtype=torch.bfloat16
         ).to("cuda")
         encoder_model.requires_grad_(False)
         encoder_model.eval()
         encoder_type = 'flux_vae'
     elif opt.model == "flux2_dev_vae":
         from diffusers.models import AutoencoderKLFlux2
+        # Read from environment variable, fallback to official repo if not set
+        flux2_path = os.environ.get("FLUX2_VAE_PATH", "black-forest-labs/FLUX.2-dev")
         encoder_model = AutoencoderKLFlux2.from_pretrained(
-            "black-forest-labs/FLUX.2-dev", subfolder="vae", torch_dtype=torch.bfloat16
+            flux2_path, subfolder="vae", torch_dtype=torch.bfloat16
         ).to("cuda")
         encoder_model.requires_grad_(False)
         encoder_model.eval()
