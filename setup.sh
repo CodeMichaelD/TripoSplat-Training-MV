@@ -185,11 +185,10 @@ esac
 if [ "$BASIC" = true ] ; then
     pip install pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja rembg onnxruntime trimesh open3d xatlas pyvista pymeshfix igraph transformers diffusers accelerate pandas redis objaverse tensordict gpustat matplotlib einops POT
     pip install git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
-    pip install git+https://github.com/facebookresearch/pytorch3d.git --no-build-isolation
 fi
 
 if [ "$TRAIN" = true ] ; then
-    pip install tensorboard pandas lpips wandb
+    pip install tensorboard pandas lpips wandb safetensors
 fi
 
 if [ "$XFORMERS" = true ] ; then
