@@ -40,14 +40,67 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 # Install OpenGL headless renderer
 print("Installing OpenGL headless renderer (pyrender)...")
-# FIX: Uninstall PyOpenGL_accelerate as it causes ctypes.ArgumentError in Kaggle/Colab
 subprocess.run(["pip", "uninstall", "-y", "PyOpenGL_accelerate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(["pip", "install", "pyrender", "PyOpenGL"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 import pyrender
 import trimesh
+import OpenGL.GL as gl
+import ctypes
 from dataset_toolkits.utils import sphere_hammersley_sequence
 
+# ==========================================
+# MONKEY-PATCH PyOpenGL for Python 3.12
+# ==========================================
+# PyOpenGL's wrapper for output parameters fails on Python 3.12's ctypes.
+# We bypass the wrapper and call the base C functions directly with explicit arrays.
+def _patch_gl_gen(func_name):
+    orig = getattr(gl, func_name)
+    def patched(n):
+        arr = (gl.GLuint * n)()
+        if hasattr(orig, 'baseFunction'):
+            orig.baseFunction(n, arr)
+        else:
+            orig(n, arr)
+        return arr[0] if n == 1 else arr
+    return patched
+
+def _patch_gl_delete(func_name):
+    orig = getattr(gl, func_name)
+    def patched(ids):
+        if isinstance(ids, int):
+            arr = (gl.GLuint * 1)(ids)
+            n = 1
+        else:
+            arr = ids
+            n = len(arr)
+        if hasattr(orig, 'baseFunction'):
+            orig.baseFunction(n, arr)
+        else:
+            orig(n, arr)
+    return patched
+
+# Apply patches to OpenGL.GL
+for func in ['glGenTextures', 'glGenFramebuffers', 'glGenRenderbuffers', 'glGenVertexArrays', 'glGenBuffers']:
+    setattr(gl, func, _patch_gl_gen(func))
+
+for func in ['glDeleteTextures', 'glDeleteFramebuffers', 'glDeleteRenderbuffers', 'glDeleteVertexArrays', 'glDeleteBuffers']:
+    setattr(gl, func, _patch_gl_delete(func))
+
+# Apply patches to pyrender modules that imported them directly
+import pyrender.texture
+import pyrender.offscreen
+import pyrender.renderer
+
+for mod in [pyrender.texture, pyrender.offscreen, pyrender.renderer]:
+    for func in ['glGenTextures', 'glGenFramebuffers', 'glGenRenderbuffers', 'glGenVertexArrays', 'glGenBuffers',
+                 'glDeleteTextures', 'glDeleteFramebuffers', 'glDeleteRenderbuffers', 'glDeleteVertexArrays', 'glDeleteBuffers']:
+        if hasattr(mod, func):
+            setattr(mod, func, getattr(gl, func))
+
+# ==========================================
+# RENDERING & UTILITY FUNCTIONS
+# ==========================================
 def get_sha256(filepath):
     sha256 = hashlib.sha256()
     with open(filepath, "rb") as f:
@@ -62,7 +115,6 @@ def find_front_view(transforms):
     for i, frame in enumerate(transforms['frames']):
         c2w = np.array(frame['transform_matrix'])
         pos = c2w[:3, 3]
-        # In TripoSplat, Z is the up-axis. Minimizing abs(Z) finds the equator/front view.
         if abs(pos[2]) < min_z:
             min_z = abs(pos[2])
             front_idx = i
@@ -73,7 +125,6 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
     # Load mesh
     mesh = trimesh.load(mesh_path, force='scene')
     if isinstance(mesh, trimesh.Scene):
-        # FIX: Use modern trimesh concatenation to avoid deprecation warning
         mesh = trimesh.util.concatenate(mesh.dump())
         
     # Normalize mesh to fit in a unit bounding box centered at origin
@@ -100,7 +151,7 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=5.0)
     scene.add(light, pose=np.eye(4))
     
-    # FIX: Add Camera to the scene (pyrender requires an explicit camera node)
+    # Add Camera to the scene
     fov = 40.0 / 180.0 * np.pi
     camera = pyrender.PerspectiveCamera(yfov=fov, aspectRatio=1.0)
     camera_node = pyrender.Node(camera=camera, matrix=np.eye(4))
@@ -174,7 +225,6 @@ for mesh in mesh_files:
     mesh_path = os.path.join(MESH_DIR, mesh)
     sha = get_sha256(mesh_path)
     
-    # Symlink mesh to raw_dir so the toolkit can find it
     dst = os.path.join(raw_dir, mesh)
     if not os.path.exists(dst):
         os.symlink(mesh_path, dst)
@@ -182,7 +232,7 @@ for mesh in mesh_files:
     metadata.append({
         "sha256": sha,
         "local_path": os.path.join("raw", mesh),
-        "aesthetic_score": 5.0, # Dummy score to pass filters
+        "aesthetic_score": 5.0, 
         "rendered": False,
         "cond_rendered": False
     })
@@ -241,7 +291,6 @@ renders_ctrl_dir = os.path.join(OUT_DIR, "renders_ctrl")
 os.makedirs(renders_cond_dir, exist_ok=True)
 os.makedirs(renders_ctrl_dir, exist_ok=True)
 
-# Map mesh filename (without ext) to ctrl image path
 ctrl_images = {
     os.path.splitext(f)[0]: os.path.join(CTRL_IMG_DIR, f)
     for f in os.listdir(CTRL_IMG_DIR) if f.endswith(('.png', '.jpg', '.webp'))
@@ -258,7 +307,6 @@ for _, row in tqdm(df.iterrows(), total=len(df), desc="Copying conditioning imag
         with open(transforms_path, "r") as f:
             transforms = json.load(f)
             
-        # Find the actual front-facing view from the 150 rendered orbit views
         front_idx = find_front_view(transforms)
         front_frame = transforms['frames'][front_idx]
         
@@ -269,7 +317,6 @@ for _, row in tqdm(df.iterrows(), total=len(df), desc="Copying conditioning imag
         dst_img = os.path.join(cond_dst_dir, "000.webp")
         shutil.copy(src_img, dst_img)
         
-        # Write the exact camera params for this front view
         cond_transforms = {
             "frames": [{
                 "file_path": "image/000.webp",
@@ -288,15 +335,13 @@ for _, row in tqdm(df.iterrows(), total=len(df), desc="Copying conditioning imag
         ctrl_dst_dir = os.path.join(renders_ctrl_dir, sha, "image")
         os.makedirs(ctrl_dst_dir, exist_ok=True)
         
-        # Convert to webp and ensure RGBA
         img = Image.open(ctrl_src).convert("RGBA")
         img.save(os.path.join(ctrl_dst_dir, "000.webp"), "WEBP")
         
-        # Write dummy camera params
         ctrl_transforms = {
             "frames": [{
                 "file_path": "image/000.webp",
-                "camera_angle_x": 0.6911,  # ~40 degrees FOV
+                "camera_angle_x": 0.6911,  
                 "camera_orthographic": False,
                 "transform_matrix": [[1,0,0,0], [0,1,0,0], [0,0,1,2], [0,0,0,1]]
             }]
