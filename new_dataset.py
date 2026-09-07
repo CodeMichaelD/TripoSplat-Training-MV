@@ -299,7 +299,14 @@ subprocess.run([
     "--num_pcds", "16384"
 ], check=True)
 
-# --- FIX: Merge pcd feature records into metadata.csv ---
+print(" Step 3.5: Extracting 3D Point Features (FLUX.2 VAE)...")
+subprocess.run([
+    "python", "dataset_toolkits/extract_pcd_feature.py",
+    "--output_dir", OUT_DIR,
+    "--model", "flux2_dev_vae",
+    "--num_pcds", "16384"
+], check=True)
+
 print(" Merging pcd feature records into metadata.csv...")
 subprocess.run([
     "python", "dataset_toolkits/build_metadata.py", "custom",
