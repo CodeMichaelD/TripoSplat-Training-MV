@@ -1,4 +1,3 @@
-# test_dummy_lora.py
 import os
 import sys
 import torch
@@ -25,6 +24,13 @@ cfg.models.denoiser.args.ctrl_channels = 1280 # Match DINOv3 output
 
 print(" Building Model...")
 model = getattr(models, cfg.models.denoiser.name)(**cfg.models.denoiser.args).cuda()
+
+# ─── FIX: Bypass zero-init for the dummy test so gradients can flow on Step 0 ───
+print(" Bypassing zero-init for dummy gradient test...")
+model.out_layer.weight.data.normal_(std=0.02)
+if hasattr(model, 'ctrl_embedder') and model.ctrl_embedder is not None:
+    model.ctrl_embedder.weight.data.normal_(std=0.02)
+# ────────────────────────────────────────────────────────────────────────────────
 
 print(" Injecting Control LoRA...")
 # 1. Freeze all base parameters
