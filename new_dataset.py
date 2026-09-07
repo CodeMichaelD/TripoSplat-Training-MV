@@ -56,24 +56,48 @@ from dataset_toolkits.utils import sphere_hammersley_sequence
 # We bypass the wrapper and call the base C functions directly with explicit arrays.
 def _patch_gl_gen(func_name):
     orig = getattr(gl, func_name)
-    def patched(n):
-        arr = (gl.GLuint * n)()
-        if hasattr(orig, 'baseFunction'):
-            orig.baseFunction(n, arr)
+    def patched(*args):
+        # Handle both glGenTextures(n) and glGenTextures(n, arr) calling conventions
+        if len(args) == 1:
+            n = args[0]
+            arr = (gl.GLuint * n)()
+            if hasattr(orig, 'baseFunction'):
+                orig.baseFunction(n, arr)
+            else:
+                orig(n, arr)
+            return arr[0] if n == 1 else arr
+        elif len(args) == 2:
+            n, arr = args
+            if hasattr(orig, 'baseFunction'):
+                orig.baseFunction(n, arr)
+            else:
+                orig(n, arr)
         else:
-            orig(n, arr)
-        return arr[0] if n == 1 else arr
+            raise TypeError(f"{func_name}() takes 1 or 2 positional arguments but {len(args)} were given")
     return patched
 
 def _patch_gl_delete(func_name):
     orig = getattr(gl, func_name)
-    def patched(ids):
-        if isinstance(ids, int):
-            arr = (gl.GLuint * 1)(ids)
-            n = 1
+    def patched(*args):
+        # Handle both glDeleteTextures(ids) and glDeleteTextures(n, ids) calling conventions
+        if len(args) == 1:
+            ids = args[0]
+            if isinstance(ids, int):
+                arr = (gl.GLuint * 1)(ids)
+                n = 1
+            else:
+                arr = ids
+                n = len(arr)
+        elif len(args) == 2:
+            n, ids = args
+            if isinstance(ids, int):
+                arr = (gl.GLuint * 1)(ids)
+                n = 1
+            else:
+                arr = ids
         else:
-            arr = ids
-            n = len(arr)
+            raise TypeError(f"{func_name}() takes 1 or 2 positional arguments but {len(args)} were given")
+        
         if hasattr(orig, 'baseFunction'):
             orig.baseFunction(n, arr)
         else:
