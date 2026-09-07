@@ -28,8 +28,7 @@ REPO_DIR = "/kaggle/working/TripoSplat-Training-MV"
 from kaggle_secrets import UserSecretsClient
 user_secrets = UserSecretsClient()
 HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
-# IMPORTANT: export token to environment so subprocesses can use it
-os.environ["HF_TOKEN"] = HF_TOKEN
+os.environ["HF_TOKEN"] = HF_TOKEN  # Make token available to subprocesses
 
 HF_REPO_ID = "codemichaeld/triposplat-control-dataset"
 NUM_VIEWS = 150
@@ -43,8 +42,8 @@ print("Installing OpenGL headless renderer (pyrender)...")
 subprocess.run(["pip", "uninstall", "-y", "PyOpenGL_accelerate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(["pip", "install", "pyrender", "PyOpenGL"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-print("Installing POT (Python Optimal Transport)...")
-subprocess.run(["pip", "install", "POT"], check=True)
+print("Installing POT, pytorch3d, utils3d...")
+subprocess.run(["pip", "install", "POT", "pytorch3d", "utils3d"], check=True)
 
 import pyrender
 import trimesh
@@ -296,8 +295,42 @@ subprocess.run([
 ], check=True)
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
 
+# ==========================================
+# PATCH encode_latentsequence.py to show full traceback
+# ==========================================
+encode_path = os.path.join(REPO_DIR, "dataset_toolkits/encode_latentsequence.py")
+with open(encode_path, "r") as f:
+    content = f.read()
+
+old_loader = '                    print(f"Error loading features for {sha256}: {e}")'
+new_loader = """                    import traceback
+                    traceback.print_exc()
+                    print(f"Error loading features for {sha256}: {e}")"""
+old_outer = """    except:
+        print("Error happened during processing.")"""
+new_outer = """    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Error happened during processing: {e}")"""
+
+modified = False
+if old_loader in content:
+    content = content.replace(old_loader, new_loader)
+    modified = True
+if old_outer in content:
+    content = content.replace(old_outer, new_outer)
+    modified = True
+if modified:
+    with open(encode_path, "w") as f:
+        f.write(content)
+    print("✅ Patched encode_latentsequence.py")
+else:
+    print("⚠️ encode_latentsequence.py patch not applied (lines not found)")
+
+# ==========================================
+# Step 4: Encoding 3D Latent Sequences (VAE)
+# ==========================================
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
-# Use check=False so we can inspect output even if it fails
 proc = subprocess.run([
     "python", "dataset_toolkits/encode_latentsequence.py",
     "--output_dir", OUT_DIR,
@@ -305,44 +338,27 @@ proc = subprocess.run([
     "--filter_low_aesthetic_score", "0.0"
 ], capture_output=True, text=True)
 
-# Always print the output,  because even on success there may be hidden errors
 print("=== LATENT ENCODING STDOUT ===")
 print(proc.stdout)
 print("=== LATENT ENCODING STDERR ===")
 print(proc.stderr)
 
 if proc.returncode != 0:
-    raise RuntimeError(f"Latent encoding subprocess failed with code {proc.returncode}")
+    raise RuntimeError(f"Latent encoding failed with code {proc.returncode}")
 
-# Check if files were created
-latent_dir = os.path.join(OUT_DIR, "latents", "triposplat_vae_encoder_fp16")
+# Verify .npz files
+latent_name = "triposplat_vae_encoder_fp16"  # Default from --enc_pretrained
+latent_dir = os.path.join(OUT_DIR, "latents", latent_name)
 if not os.path.exists(latent_dir):
-    raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding likely failed silently.")
+    raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding likely failed.")
 npz_files = [f for f in os.listdir(latent_dir) if f.endswith('.npz')]
 if len(npz_files) == 0:
-    # If no files, print the captured output again and raise
-    print(" No latent .npz files found. Full output:")
-    print("=== STDOUT ===")
-    print(proc.stdout)
-    print("=== STDERR ===")
-    print(proc.stderr)
-    raise RuntimeError(f"No latent .npz files found in {latent_dir}. Encoding may have failed silently.")
+    raise RuntimeError(f"No .npz files in {latent_dir}. See output above for error.")
 else:
     print(f" Found {len(npz_files)} latent files.")
 
-# Verify that .npz files were created
-latent_dir = os.path.join(OUT_DIR, "latents", "triposplat_vae_encoder_fp16")
-if os.path.exists(latent_dir):
-    npz_files = [f for f in os.listdir(latent_dir) if f.endswith('.npz')]
-    if len(npz_files) == 0:
-        raise RuntimeError(f"No latent .npz files found in {latent_dir}. Encoding may have failed silently.")
-    else:
-        print(f" Found {len(npz_files)} latent files.")
-else:
-    raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding failed.")
-
 # ==========================================
-# *** FIX: Merge latent records into metadata.csv ***
+# Merge latent records into metadata.csv
 # ==========================================
 print(" Merging latent records into metadata.csv...")
 subprocess.run([
