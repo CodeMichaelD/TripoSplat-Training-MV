@@ -8,7 +8,7 @@ from easydict import EasyDict as edict
 sys.path.insert(0, "/kaggle/working/TripoSplat-Training-MV")
 os.environ["ATTN_BACKEND"] = "sdpa" # Bypass flash_attn
 
-from deg import models, trainers
+from deg import models
 from deg.utils.lora_utils import inject_lora
 
 print(" Loading 1k config to save VRAM...")
@@ -39,23 +39,28 @@ print(f" Trainable parameters: {trainable_params:,} (Should be small!)")
 print(" Generating Dummy Batch...")
 B = 1
 L = 1024
+
+# ─── FIX: The model expects float32 inputs and handles fp16 conversion internally! ───
 dummy_x = {
-    'latent': torch.randn(B, L, 16, device='cuda', dtype=torch.float16),
-    'camera': torch.randn(B, 1, 5, device='cuda', dtype=torch.float16)
+    'latent': torch.randn(B, L, 16, device='cuda', dtype=torch.float32),
+    'camera': torch.randn(B, 1, 5, device='cuda', dtype=torch.float32)
 }
 from tensordict import TensorDict
 dummy_x = TensorDict(dummy_x, batch_size=B)
 
-dummy_cond = TensorDict({'feature1': torch.randn(B, 257, 1280, device='cuda', dtype=torch.float16)}, batch_size=B)
-dummy_ctrl_tokens = torch.randn(B, 256, 1280, device='cuda', dtype=torch.float16)
+dummy_cond = TensorDict({'feature1': torch.randn(B, 257, 1280, device='cuda', dtype=torch.float32)}, batch_size=B)
+dummy_ctrl_tokens = torch.randn(B, 256, 1280, device='cuda', dtype=torch.float32)
 
-t = torch.tensor([500.0], device='cuda')
+t = torch.tensor([500.0], device='cuda', dtype=torch.float32)
 
 print(" Running Forward & Backward Pass...")
 model.train()
+
 # Forward
 out = model(dummy_x, t, dummy_cond, ctrl_tokens=dummy_ctrl_tokens)
-loss = out['latent'].mean() 
+
+# FIX: Cast to float32 before computing mean to avoid fp16 overflow/underflow
+loss = out['latent'].float().mean() 
 
 # Backward
 loss.backward()
