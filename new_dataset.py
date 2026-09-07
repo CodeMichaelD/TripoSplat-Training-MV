@@ -306,7 +306,7 @@ subprocess.run([
     "--output_dir", OUT_DIR,
     "--model", "dinov3_vith16plus",
     "--num_pcds", "16384",
-    "--batch_size", "1"  # <--- FORCE BATCH SIZE TO 1
+    "--batch_size", "1"
 ], check=True)
 
 print(" Step 3.5: Extracting 3D Point Features (FLUX.2 VAE)...")
@@ -323,7 +323,6 @@ subprocess.run([
     "--output_dir", OUT_DIR
 ], check=True)
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
-# --------------------------------------------------------
 
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
 subprocess.run([
@@ -332,7 +331,18 @@ subprocess.run([
     "--latent_length", "1024",
     "--filter_low_aesthetic_score", "0.0"
 ], check=True)
+
+# ==========================================
+# *** FIX: Merge latent records into metadata.csv ***
+# ==========================================
+print(" Merging latent records into metadata.csv...")
+subprocess.run([
+    "python", "dataset_toolkits/build_metadata.py", "custom",
+    "--output_dir", OUT_DIR
+], check=True)
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
+# ==========================================
+
 # ==========================================
 # 4. ORGANIZE CONDITIONING IMAGES
 # ==========================================
