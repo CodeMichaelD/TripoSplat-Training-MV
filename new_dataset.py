@@ -287,7 +287,6 @@ def foreach_instance(metadata, output_dir, func, **kwargs):
         if res: records.append(res)
     return pd.DataFrame.from_records(records)
 """)
-
 # ==========================================
 # 3. RUN TRIPOSPLAT TOOLKIT PIPELINE (OPENGL HEADLESS)
 # ==========================================
