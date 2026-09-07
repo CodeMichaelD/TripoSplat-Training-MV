@@ -13,7 +13,7 @@ DEFAULT_HF_CONFIG_FILE = "configs/dit/latent8k-cond1k-latentseq_flow_img_s3dit-L
 DEFAULT_HF_DENOISER_PATH = f"hf://{DEFAULT_HF_REPO_ID}/{DEFAULT_HF_DENOISER_FILE}"
 DEFAULT_HF_VAE_ENCODER_PATH = f"hf://{DEFAULT_HF_REPO_ID}/{DEFAULT_HF_VAE_ENCODER_FILE}"
 DEFAULT_DINOV3_PATH = "codemichaeld/dinov3h"
-DEFAULT_FLUX2_VAE_PATH = "black-forest-labs/FLUX.2-dev"
+DEFAULT_FLUX2_VAE_PATH = "unsloth/FLUX.2-klein-9B"
 
 def env_flag_enabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
