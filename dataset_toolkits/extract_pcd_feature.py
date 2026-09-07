@@ -178,7 +178,7 @@ if __name__ == '__main__':
                 try:
                     with open(os.path.join(opt.output_dir, 'renders', sha256, 'transforms.json'), 'r') as f:
                         metadata = json.load(f)
-                    frames = metadata['frames']
+                    frames = metadata['frames'][::3]
                     data = []
                     if encoder_type == 'dinov2':
                         resolution = (518, 518)
@@ -186,7 +186,7 @@ if __name__ == '__main__':
                             datum['image'] = transform(datum['image'])
                             data.append(datum)
                     elif encoder_type == 'dinov3':
-                        resolution = (1024, 1024)
+                        resolution = (518, 518) 
                         for datum in get_data(frames, sha256, resolution=resolution):
                             datum['image'] = transform(datum['image'])
                             data.append(datum)
