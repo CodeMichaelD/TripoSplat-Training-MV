@@ -40,8 +40,9 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 # Install OpenGL headless renderer
 print("Installing OpenGL headless renderer (pyrender)...")
-subprocess.run(["pip", "install", "pyrender", "PyOpenGL", "PyOpenGL_accelerate"], 
-               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# FIX: Uninstall PyOpenGL_accelerate as it causes ctypes.ArgumentError in Kaggle/Colab
+subprocess.run(["pip", "uninstall", "-y", "PyOpenGL_accelerate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run(["pip", "install", "pyrender", "PyOpenGL"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 import pyrender
 import trimesh
