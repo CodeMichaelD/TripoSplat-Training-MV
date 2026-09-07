@@ -403,7 +403,8 @@ class LatentSeqMMFlowModel(nn.Module):
         # Handle Control Tokens
         ctrl_tokens = kwargs.get('ctrl_tokens', None)
         if ctrl_tokens is not None and self.ctrl_embedder is not None:
-            h_ctrl = self.ctrl_embedder(ctrl_tokens)
+            # FIX: Cast to self.dtype (float16) to match the transformer blocks!
+            h_ctrl = self.ctrl_embedder(ctrl_tokens).type(self.dtype)
             h = torch.cat([h, h_ctrl], dim=1)
         
         mid_features = None
