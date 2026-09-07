@@ -10,7 +10,7 @@ import hashlib
 from huggingface_hub import HfApi, create_repo
 
 # ==========================================
-# 0. ENVIRONMENT SETUP FOR HEADLESS OPENGL
+# 0. ENVIRONMENT SETUP
 # ==========================================
 os.environ["ATTN_BACKEND"] = "sdpa"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
@@ -28,20 +28,21 @@ REPO_DIR = "/kaggle/working/TripoSplat-Training-MV"
 from kaggle_secrets import UserSecretsClient
 user_secrets = UserSecretsClient()
 HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
-HF_REPO_ID = "codemichaeld/triposplat-control-dataset"
+# IMPORTANT: export token to environment so subprocesses can use it
+os.environ["HF_TOKEN"] = HF_TOKEN
 
+HF_REPO_ID = "codemichaeld/triposplat-control-dataset"
 NUM_VIEWS = 150
 
 # ==========================================
 os.chdir(REPO_DIR)
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# Install OpenGL and other dependencies
+# Install dependencies
 print("Installing OpenGL headless renderer (pyrender)...")
 subprocess.run(["pip", "uninstall", "-y", "PyOpenGL_accelerate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(["pip", "install", "pyrender", "PyOpenGL"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# Install POT (required for encode_latentsequence.py)
 print("Installing POT (Python Optimal Transport)...")
 subprocess.run(["pip", "install", "POT"], check=True)
 
@@ -296,12 +297,34 @@ subprocess.run([
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
 
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
-subprocess.run([
+# Run with captured output to see errors
+proc = subprocess.run([
     "python", "dataset_toolkits/encode_latentsequence.py",
     "--output_dir", OUT_DIR,
     "--latent_length", "1024",
     "--filter_low_aesthetic_score", "0.0"
-], check=True)
+], capture_output=True, text=True)
+
+if proc.returncode != 0:
+    print("❌ Latent encoding failed!")
+    print("=== STDOUT ===")
+    print(proc.stdout)
+    print("=== STDERR ===")
+    print(proc.stderr)
+    raise RuntimeError("Latent encoding subprocess failed")
+
+print("Latent encoding completed successfully.")
+
+# Verify that .npz files were created
+latent_dir = os.path.join(OUT_DIR, "latents", "triposplat_vae_encoder_fp16")
+if os.path.exists(latent_dir):
+    npz_files = [f for f in os.listdir(latent_dir) if f.endswith('.npz')]
+    if len(npz_files) == 0:
+        raise RuntimeError(f"No latent .npz files found in {latent_dir}. Encoding may have failed silently.")
+    else:
+        print(f"✅ Found {len(npz_files)} latent files.")
+else:
+    raise RuntimeError(f"Latent directory {latent_dir} does not exist. Encoding failed.")
 
 # ==========================================
 # *** FIX: Merge latent records into metadata.csv ***
