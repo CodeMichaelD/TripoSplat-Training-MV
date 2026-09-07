@@ -72,7 +72,8 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
     # Load mesh
     mesh = trimesh.load(mesh_path, force='scene')
     if isinstance(mesh, trimesh.Scene):
-        mesh = mesh.dump(concatenate=True)
+        # FIX: Use modern trimesh concatenation to avoid deprecation warning
+        mesh = trimesh.util.concatenate(mesh.dump())
         
     # Normalize mesh to fit in a unit bounding box centered at origin
     bounds = mesh.bounds
@@ -98,12 +99,17 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=5.0)
     scene.add(light, pose=np.eye(4))
     
+    # FIX: Add Camera to the scene (pyrender requires an explicit camera node)
+    fov = 40.0 / 180.0 * np.pi
+    camera = pyrender.PerspectiveCamera(yfov=fov, aspectRatio=1.0)
+    camera_node = pyrender.Node(camera=camera, matrix=np.eye(4))
+    scene.add_node(camera_node)
+    
     # Initialize renderer
     renderer = pyrender.OffscreenRenderer(width, height)
     
     frames = []
     radius = 2.0
-    fov = 40.0 / 180.0 * np.pi
     
     offset = (np.random.rand(), np.random.rand())
     for i in range(num_views):
@@ -129,6 +135,9 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
         c2w[:3, 1] = u
         c2w[:3, 2] = -f
         c2w[:3, 3] = C
+        
+        # Update camera pose for this frame
+        scene.set_pose(camera_node, pose=c2w)
         
         # Render
         color, depth = renderer.render(scene, flags=pyrender.constants.RenderFlags.RGBA)
