@@ -322,6 +322,7 @@ subprocess.run([
     "python", "dataset_toolkits/build_metadata.py", "custom",
     "--output_dir", OUT_DIR
 ], check=True)
+df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
 # --------------------------------------------------------
 
 print(" Step 4: Encoding 3D Latent Sequences (VAE)...")
@@ -331,7 +332,7 @@ subprocess.run([
     "--latent_length", "1024",
     "--filter_low_aesthetic_score", "0.0"
 ], check=True)
-
+df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
 # ==========================================
 # 4. ORGANIZE CONDITIONING IMAGES
 # ==========================================
