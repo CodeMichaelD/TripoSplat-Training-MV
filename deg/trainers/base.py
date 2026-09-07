@@ -88,6 +88,13 @@ class Trainer:
         self.num_workers = num_workers if num_workers is not None else int(np.ceil(os.cpu_count() / torch.cuda.device_count()))
         self.gradient_checkpointing = gradient_checkpointing
         self.use_wandb = use_wandb
+        
+        # LoRA configuration
+        self.train_lora_only = kwargs.get('train_lora_only', False)
+        self.lora_rank = kwargs.get('lora_rank', 16)
+        self.lora_alpha = kwargs.get('lora_alpha', 1.0)
+        self.lora_blocks = kwargs.get('lora_blocks', list(range(20, 24)))
+        
         self.graceful_stop = graceful_stop
         self.shuffle_data = shuffle_data
         self.prefetch_factor = prefetch_factor

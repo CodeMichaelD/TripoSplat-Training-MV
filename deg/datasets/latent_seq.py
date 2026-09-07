@@ -369,10 +369,11 @@ class ImageConditionedGSOctreeLatent(ImageConditionedMixin, GSOctreeLatent):
 
 class SmartImageConditionedMixin(ImageConditionedMixin):
     def __init__(
-        self, 
+        self,
         *args,
         predict_cam_token: bool = False,
         cond_jitter_prob: float = 0.0,
+        control_image_dir: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -387,6 +388,7 @@ class SmartImageConditionedMixin(ImageConditionedMixin):
         )
         self.predict_cam_token = predict_cam_token
         self.cond_jitter_prob = cond_jitter_prob
+        self.control_image_dir = control_image_dir
     
     def get_instance(self, root, instance):
         # We skip ImageConditionedMixin.get_instance to control the order and view selection
@@ -462,9 +464,27 @@ class SmartImageConditionedMixin(ImageConditionedMixin):
         
         image = image2tensor(image, [self.image_size, self.image_size])
         image_raw = image2tensor(image_raw, [self.image_size, self.image_size])
+
         pack['cond'] = image
         pack['cond_raw'] = image_raw
-       
+        
+        # Load Control Image if configured
+        if self.control_image_dir is not None:
+            ctrl_root = os.path.join(root, self.control_image_dir, instance)
+            ctrl_meta_path = os.path.join(ctrl_root, 'transforms.json')
+            if os.path.exists(ctrl_meta_path):
+                with open(ctrl_meta_path) as f:
+                    ctrl_meta = json.load(f)
+                view_idx = np.random.randint(len(ctrl_meta['frames']))
+                ctrl_frame = ctrl_meta['frames'][view_idx]
+                ctrl_image_path = os.path.join(ctrl_root, ctrl_frame['file_path'])
+                ctrl_image = Image.open(ctrl_image_path)
+                ctrl_image = unified_crop(ctrl_image)
+                ctrl_image = image2tensor(ctrl_image, [self.image_size, self.image_size])
+                pack['ctrl_image'] = ctrl_image
+            else:
+                pack['ctrl_image'] = torch.zeros_like(image)
+                
         return pack
 
 

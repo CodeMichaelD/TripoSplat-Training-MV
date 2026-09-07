@@ -209,6 +209,12 @@ class FlowMatchingTrainer(BasicTrainer):
         noise = get_noise_like(x_0)
         t = self.sample_t(x_0.shape[0]).to(x_0.device).float()
         x_t = self.diffuse(x_0, t, noise=noise)
+        
+        # Encode control image if present
+        ctrl_image = kwargs.pop('ctrl_image', None)
+        if ctrl_image is not None and hasattr(self, 'encode_image'):
+            kwargs['ctrl_tokens'] = self.encode_image(ctrl_image)['feature1']
+            
         cond = self.get_cond(cond=cond, **kwargs)
         pred = self.training_models['denoiser'](x_t, t * 1000, cond, **kwargs)
         assert pred.shape == noise.shape == x_0.shape
@@ -302,6 +308,12 @@ class FlowMatchingTrainer(BasicTrainer):
             
             x_0 = self.encode_x_0(x_0)
             noise = get_noise_like(x_0)
+
+            # ─── NEW: Encode control image if present ───
+            ctrl_image = data.pop('ctrl_image', None)
+            if ctrl_image is not None and hasattr(self, 'encode_image'):
+                data['ctrl_tokens'] = self.encode_image(ctrl_image)['feature1']
+
             args = self.get_inference_cond(**data)
             res = sampler.sample(
                 self.models['denoiser'],

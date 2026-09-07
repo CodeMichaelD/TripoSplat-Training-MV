@@ -114,6 +114,21 @@ class BasicTrainer(Trainer):
         else:
             self.training_models = self.models
 
+        # Inject LoRA if configured
+        if self.train_lora_only:
+            from ...utils.lora_utils import inject_lora
+            for name, model in self.models.items():
+                if name == 'denoiser':
+                    # 1. Freeze all base parameters
+                    for p in model.parameters():
+                        p.requires_grad = False
+                    # 2. Inject LoRA into target blocks
+                    inject_lora(model, target_blocks=self.lora_blocks, rank=self.lora_rank, alpha=self.lora_alpha)
+                    # 3. Unfreeze ctrl_embedder if it exists
+                    if hasattr(model, 'ctrl_embedder') and model.ctrl_embedder is not None:
+                        for p in model.ctrl_embedder.parameters():
+                            p.requires_grad = True
+
         # Build master params
         # for model in self.models.values():
         #     for n, p in model.named_parameters():
@@ -300,6 +315,22 @@ class BasicTrainer(Trainer):
             misc_ckpt['grad_clip'] = self.grad_clip.state_dict()
         torch.save(misc_ckpt, os.path.join(self.output_dir, 'ckpts', f'misc_step{self.step:07d}.pt'))
         print(' Done.')
+        
+        # Save LoRA checkpoint if training LoRA
+        if self.train_lora_only:
+            self._save_lora_checkpoint()
+
+    def _save_lora_checkpoint(self):
+        import safetensors.torch
+        denoiser = unwrap_dist(self.models['denoiser'])
+        lora_state = {}
+        for name, param in denoiser.named_parameters():
+            if 'lora_A' in name or 'lora_B' in name or 'ctrl_embedder' in name:
+                lora_state[name] = param.data.cpu().half()
+        
+        save_path = os.path.join(self.output_dir, 'ckpts', f'lora_step{self.step:07d}.safetensors')
+        safetensors.torch.save_file(lora_state, save_path)
+        print(f' Saved LoRA to {save_path}')
 
     def finetune_from(self, finetune_ckpt):
         """

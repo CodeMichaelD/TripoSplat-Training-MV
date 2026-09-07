@@ -91,6 +91,7 @@ class LatentSeqMMFlowModel(nn.Module):
         num_head_channels: Optional[int] = 64,
         cam_channels: Optional[int] = None,
         cond2_channels: Optional[int] = None,
+        ctrl_channels: Optional[int] = None,
         mlp_ratio: float = 4,
         pe_mode: Literal["3d_ot_rope", "3d_ot_repo", "3d_ot_ape", "repo", "learnable", None] = "3d_ot_ape",
         use_fp16: bool = False,
@@ -132,6 +133,16 @@ class LatentSeqMMFlowModel(nn.Module):
             self.cond_embedder2 = nn.Linear(cond2_channels, model_channels)
         else:
             self.cond_embedder2 = None
+
+        self.ctrl_channels = ctrl_channels
+        if ctrl_channels is not None:
+            self.ctrl_embedder = nn.Linear(ctrl_channels, model_channels)
+            # Zero-init so untrained adapter does nothing initially
+            nn.init.zeros_(self.ctrl_embedder.weight)
+            if self.ctrl_embedder.bias is not None:
+                nn.init.zeros_(self.ctrl_embedder.bias)
+        else:
+            self.ctrl_embedder = None
         
         # Positional Embeddings
         self.use_rope = (self.pe_mode in ["3d_ot_rope", "3d_ot_repo", "repo"])
@@ -388,6 +399,12 @@ class LatentSeqMMFlowModel(nn.Module):
         h = torch.cat([h_x, h_cond], dim=1)
         if self.cam_channels is not None:
             h = torch.cat([h, h_cam], dim=1)
+
+        # Handle Control Tokens
+        ctrl_tokens = kwargs.get('ctrl_tokens', None)
+        if ctrl_tokens is not None and self.ctrl_embedder is not None:
+            h_ctrl = self.ctrl_embedder(ctrl_tokens)
+            h = torch.cat([h, h_ctrl], dim=1)
         
         mid_features = None
         mid_idx = len(self.blocks) // 2
