@@ -1,0 +1,90 @@
+models:
+  denoiser:
+    name: LatentSeqMMFlowModel
+    args:
+      q_token_length: 1024
+      in_channels: 16
+      cam_channels: 5
+      out_channels: 16
+      model_channels: 1024
+      cond_channels: 1280
+      cond2_channels: 128
+      ctrl_channels: 1280  # <--- NEW: Match DINOv3 feature dim
+      num_refiner_blocks: 2
+      num_blocks: 24
+      num_heads: 16
+      mlp_ratio: 4
+      pe_mode: 3d_ot_repo
+      qk_rms_norm: true
+      share_mod: true
+      use_shift_table: true
+      use_fp16: true
+
+dataset:
+  name: SmartImageConditionedGSOctreeLatent
+  args:
+    predict_cam_token: true
+    latent_token_length: 1024
+    latent_model: triposplat_vae_encoder_fp16
+    min_aesthetic_score: 4.5
+    image_size: 512 # <--- Reduced to 512 to save T4 VRAM
+    decoder_path: null
+    decoder_ckpt: step0400000
+    max_voxel_level: 8
+    max_sampled_points: 8192
+    decode_mode: gs
+    ot_mode: 3d_ot
+    control_image_dir: "renders_ctrl" # <--- NEW: Tells dataset to load control images
+
+trainer:
+  name: ImageConditionedLatentSeqFlowMatchingCFGTrainer
+  args:
+    image_cond_model: dinov3_flux2_concat_512
+    finetune_ckpt:
+      denoiser: hf://VAST-AI/TripoSplat/diffusion_models/triposplat_fp16.safetensors
+    
+    # --- LoRA Configuration ---
+    train_lora_only: true
+    lora_rank: 16
+    lora_alpha: 1.0
+    lora_blocks: [20, 21, 22, 23] # Target last 4 blocks
+    
+    max_steps: 1000 # Small run for testing
+    batch_size_per_gpu: 1 # <--- MUST BE 1 FOR T4
+    batch_split: 1
+    snapshot_num_samples: 2
+    snapshot_dataset_num_samples: 2
+    
+    optimizer:
+      name: AdamW
+      args:
+        lr: 1e-4
+        weight_decay: 0.0
+    lr_scheduler:
+      name: LambdaLR
+      args:
+        lr_lambda:
+          name: combined_warmup_cosine
+          args:
+            warmup_steps: 50
+            min_lr_ratio: 0.1
+    ema_rate: [0.9999]
+    fp16_mode: inflat_all
+    fp16_scale_growth: 0.001
+    grad_clip:
+      name: AdaptiveGradClipper
+      args:
+        max_norm: 1.0
+        clip_percentile: 95
+    i_log: 10
+    i_train_val: 10000
+    i_sample: 500
+    i_save: 500 # Save frequently since it's a short run
+    p_uncond: 0.1
+    t_schedule:
+      name: logitNormal
+      args:
+        mean: 0.0
+        std: 1.0
+    sigma_min: 0.00001
+    use_wandb: false # Disable wandb to save overhead
