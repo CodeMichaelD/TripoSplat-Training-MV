@@ -1,3 +1,4 @@
+# deg/utils/lora_utils.py
 import torch
 import torch.nn as nn
 
@@ -13,9 +14,12 @@ class LoRALinear(nn.Module):
         if self.linear.bias is not None:
             self.linear.bias.requires_grad = False
             
+        # ─── FIX: Ensure LoRA parameters are created on the exact same device as the base layer! ───
+        device = linear.weight.device
+        
         # LoRA parameters
-        self.lora_A = nn.Parameter(torch.zeros(rank, linear.in_features))
-        self.lora_B = nn.Parameter(torch.zeros(linear.out_features, rank))
+        self.lora_A = nn.Parameter(torch.zeros(rank, linear.in_features, device=device))
+        self.lora_B = nn.Parameter(torch.zeros(linear.out_features, rank, device=device))
         
         # Initialize
         nn.init.kaiming_uniform_(self.lora_A, a=5**0.5)
