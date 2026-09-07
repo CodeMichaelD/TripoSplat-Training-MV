@@ -305,7 +305,8 @@ subprocess.run([
     "python", "dataset_toolkits/extract_pcd_feature.py",
     "--output_dir", OUT_DIR,
     "--model", "dinov3_vith16plus",
-    "--num_pcds", "16384"
+    "--num_pcds", "16384",
+    "--batch_size", "1"  # <--- FORCE BATCH SIZE TO 1
 ], check=True)
 
 print(" Step 3.5: Extracting 3D Point Features (FLUX.2 VAE)...")
