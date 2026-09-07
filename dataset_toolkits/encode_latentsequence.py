@@ -144,7 +144,11 @@ if __name__ == '__main__':
                     load_queue.put((sha256, feats))
                 except Exception as e:
                     load_queue.put(None)
+                    # --- PATCH: print full traceback ---
+                    import traceback
+                    traceback.print_exc()
                     print(f"Error loading features for {sha256}: {e}")
+                    # ------------------------------------
             loader_executor.map(loader, sha256s)
             
             def saver(sha256, pack):
@@ -229,8 +233,12 @@ if __name__ == '__main__':
                 saver_executor.submit(saver, sha256, pack)
                 
             saver_executor.shutdown(wait=True)
-    except:
-        print("Error happened during processing.")
+    except Exception as e:
+        # --- PATCH: print full traceback ---
+        import traceback
+        traceback.print_exc()
+        print(f"Error happened during processing: {e}")
+        # ------------------------------------
         
     records = pd.DataFrame.from_records(records)
     records.to_csv(os.path.join(opt.output_dir, f'latent_{latent_name}_{opt.rank}.csv'), index=False)
