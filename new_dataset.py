@@ -13,7 +13,7 @@ from huggingface_hub import HfApi, create_repo
 # 1. CONFIGURATION
 # ==========================================
 # Kaggle Input Paths (where your dataset zip was extracted)
-KAGGLE_INPUT_DIR = "/kaggle/input/new_data"
+KAGGLE_INPUT_DIR = "/kaggle/input/datasets/codemichaeld/new-data"
 MESH_DIR = os.path.join(KAGGLE_INPUT_DIR, "meshes")
 CTRL_IMG_DIR = os.path.join(KAGGLE_INPUT_DIR, "ctrl_images")
 
