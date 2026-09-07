@@ -305,7 +305,7 @@ proc = subprocess.run([
     "--filter_low_aesthetic_score", "0.0"
 ], capture_output=True, text=True)
 
-# Always print the output, because even on success there may be hidden errors
+# Always print the output,  because even on success there may be hidden errors
 print("=== LATENT ENCODING STDOUT ===")
 print(proc.stdout)
 print("=== LATENT ENCODING STDERR ===")
