@@ -13,42 +13,37 @@ from huggingface_hub import HfApi, create_repo
 # 0. ENVIRONMENT SETUP FOR HEADLESS OPENGL
 # ==========================================
 os.environ["ATTN_BACKEND"] = "sdpa"
-# Set EGL platform for headless OpenGL rendering in Kaggle/GPU environments
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-# Kaggle Input Paths (where your dataset zip was extracted)
 KAGGLE_INPUT_DIR = "/kaggle/input/datasets/codemichaeld/new-data"
 MESH_DIR = os.path.join(KAGGLE_INPUT_DIR, "meshes")
 CTRL_IMG_DIR = os.path.join(KAGGLE_INPUT_DIR, "ctrl_images")
 
-# Output dataset directory (Kaggle's writable workspace)
 OUT_DIR = "/kaggle/working/triposplat_dataset"
 REPO_DIR = "/kaggle/working/TripoSplat-Training-MV"
 
 from kaggle_secrets import UserSecretsClient
-
-# Initialize the secrets client
 user_secrets = UserSecretsClient()
-
-# Retrieve your secret value using its label
 HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
-# Hugging Face Config
-HF_REPO_ID = "codemichaeld/triposplat-control-dataset" # <--- REPLACE WITH YOUR DESIRED HF REPO NAME
+HF_REPO_ID = "codemichaeld/triposplat-control-dataset"
 
-# VAE Rendering Config
-NUM_VIEWS = 150  # Standard for VAE feature extraction
+NUM_VIEWS = 150
 
 # ==========================================
 os.chdir(REPO_DIR)
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# Install OpenGL headless renderer
+# Install OpenGL and other dependencies
 print("Installing OpenGL headless renderer (pyrender)...")
 subprocess.run(["pip", "uninstall", "-y", "PyOpenGL_accelerate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(["pip", "install", "pyrender", "PyOpenGL"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Install POT (required for encode_latentsequence.py)
+print("Installing POT (Python Optimal Transport)...")
+subprocess.run(["pip", "install", "POT"], check=True)
 
 import pyrender
 import trimesh
@@ -59,12 +54,9 @@ from dataset_toolkits.utils import sphere_hammersley_sequence
 # ==========================================
 # MONKEY-PATCH PyOpenGL for Python 3.12
 # ==========================================
-# PyOpenGL's wrapper for output parameters fails on Python 3.12's ctypes.
-# We bypass the wrapper and call the base C functions directly with explicit arrays.
 def _patch_gl_gen(func_name):
     orig = getattr(gl, func_name)
     def patched(*args):
-        # Handle both glGenTextures(n) and glGenTextures(n, arr) calling conventions
         if len(args) == 1:
             n = args[0]
             arr = (gl.GLuint * n)()
@@ -86,7 +78,6 @@ def _patch_gl_gen(func_name):
 def _patch_gl_delete(func_name):
     orig = getattr(gl, func_name)
     def patched(*args):
-        # Handle both glDeleteTextures(ids) and glDeleteTextures(n, ids) calling conventions
         if len(args) == 1:
             ids = args[0]
             if isinstance(ids, int):
@@ -104,25 +95,20 @@ def _patch_gl_delete(func_name):
                 arr = ids
         else:
             raise TypeError(f"{func_name}() takes 1 or 2 positional arguments but {len(args)} were given")
-        
         if hasattr(orig, 'baseFunction'):
             orig.baseFunction(n, arr)
         else:
             orig(n, arr)
     return patched
 
-# Apply patches to OpenGL.GL
 for func in ['glGenTextures', 'glGenFramebuffers', 'glGenRenderbuffers', 'glGenVertexArrays', 'glGenBuffers']:
     setattr(gl, func, _patch_gl_gen(func))
-
 for func in ['glDeleteTextures', 'glDeleteFramebuffers', 'glDeleteRenderbuffers', 'glDeleteVertexArrays', 'glDeleteBuffers']:
     setattr(gl, func, _patch_gl_delete(func))
 
-# Apply patches to pyrender modules that imported them directly
 import pyrender.texture
 import pyrender.offscreen
 import pyrender.renderer
-
 for mod in [pyrender.texture, pyrender.offscreen, pyrender.renderer]:
     for func in ['glGenTextures', 'glGenFramebuffers', 'glGenRenderbuffers', 'glGenVertexArrays', 'glGenBuffers',
                  'glDeleteTextures', 'glDeleteFramebuffers', 'glDeleteRenderbuffers', 'glDeleteVertexArrays', 'glDeleteBuffers']:
@@ -140,7 +126,6 @@ def get_sha256(filepath):
     return sha256.hexdigest()
 
 def find_front_view(transforms):
-    """Find the view where the camera is looking most straight at the object (min Z position)."""
     min_z = float('inf')
     front_idx = 0
     for i, frame in enumerate(transforms['frames']):
@@ -152,59 +137,37 @@ def find_front_view(transforms):
     return front_idx
 
 def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, width=512, height=512):
-    """Renders views using pyrender (OpenGL Headless) and saves transforms.json & mesh.ply"""
-    # Load mesh
     mesh = trimesh.load(mesh_path, force='scene')
     if isinstance(mesh, trimesh.Scene):
         mesh = trimesh.util.concatenate(mesh.dump())
-        
-    # Normalize mesh to fit in a unit bounding box centered at origin
     bounds = mesh.bounds
     center = (bounds[0] + bounds[1]) / 2
     scale = 1.0 / (bounds[1] - bounds[0]).max()
-    
     mesh.apply_translation(-center)
     mesh.apply_scale(scale)
-    
-    # Save normalized mesh as PLY
     out_mesh_dir = os.path.join(output_dir, "renders", sha256)
     os.makedirs(out_mesh_dir, exist_ok=True)
     mesh.export(os.path.join(out_mesh_dir, "mesh.ply"))
-    
-    # Setup pyrender scene
     scene = pyrender.Scene(bg_color=[0, 0, 0, 0], ambient_light=[0.5, 0.5, 0.5])
-    
-    # Add mesh to scene
     pr_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=True)
     scene.add(pr_mesh)
-        
-    # Add lights
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=5.0)
     scene.add(light, pose=np.eye(4))
-    
-    # Add Camera to the scene
     fov = 40.0 / 180.0 * np.pi
     camera = pyrender.PerspectiveCamera(yfov=fov, aspectRatio=1.0)
     camera_node = pyrender.Node(camera=camera, matrix=np.eye(4))
     scene.add_node(camera_node)
-    
-    # Initialize renderer
     renderer = pyrender.OffscreenRenderer(width, height)
-    
     frames = []
     radius = 2.0
-    
     offset = (np.random.rand(), np.random.rand())
     for i in range(num_views):
         y, p = sphere_hammersley_sequence(i, num_views, offset)
-        
-        # Calculate c2w (Camera to World) matching Blender's Z-up convention
         x = radius * np.cos(y) * np.cos(p)
         y_pos = radius * np.sin(y) * np.cos(p)
         z = radius * np.sin(p)
         C = np.array([x, y_pos, z])
-        
-        f = -C / np.linalg.norm(C) # Forward (looking at origin)
+        f = -C / np.linalg.norm(C)
         up_world = np.array([0, 0, 1])
         r = np.cross(f, up_world)
         if np.linalg.norm(r) < 1e-6:
@@ -212,34 +175,23 @@ def render_mesh_opengl_headless(mesh_path, output_dir, sha256, num_views=150, wi
         else:
             r = r / np.linalg.norm(r)
         u = np.cross(r, f)
-        
         c2w = np.eye(4)
         c2w[:3, 0] = r
         c2w[:3, 1] = u
         c2w[:3, 2] = -f
         c2w[:3, 3] = C
-        
-        # Update camera pose for this frame
         scene.set_pose(camera_node, pose=c2w)
-        
-        # Render
         color, depth = renderer.render(scene, flags=pyrender.constants.RenderFlags.RGBA)
-        
-        # Save image
         img_dir = os.path.join(out_mesh_dir, "image")
         os.makedirs(img_dir, exist_ok=True)
         img_path = os.path.join(img_dir, f"{i:03d}.webp")
         Image.fromarray(color).save(img_path, "WEBP")
-        
         frames.append({
             "file_path": f"image/{i:03d}.webp",
             "camera_angle_x": fov,
             "transform_matrix": c2w.tolist()
         })
-        
     renderer.delete()
-    
-    # Save transforms.json
     with open(os.path.join(out_mesh_dir, "transforms.json"), "w") as f:
         json.dump({"frames": frames}, f, indent=4)
 
@@ -255,15 +207,13 @@ os.makedirs(raw_dir, exist_ok=True)
 for mesh in mesh_files:
     mesh_path = os.path.join(MESH_DIR, mesh)
     sha = get_sha256(mesh_path)
-    
     dst = os.path.join(raw_dir, mesh)
     if not os.path.exists(dst):
         os.symlink(mesh_path, dst)
-        
     metadata.append({
         "sha256": sha,
         "local_path": os.path.join("raw", mesh),
-        "aesthetic_score": 5.0, 
+        "aesthetic_score": 5.0,
         "rendered": False,
         "cond_rendered": False
     })
@@ -271,7 +221,7 @@ for mesh in mesh_files:
 df = pd.DataFrame(metadata)
 df.to_csv(os.path.join(OUT_DIR, "metadata.csv"), index=False)
 
-# Create a dummy dataset module so the toolkit accepts our local files
+# Create custom.py in the datasets folder
 custom_module_path = os.path.join(REPO_DIR, "dataset_toolkits/datasets/custom.py")
 with open(custom_module_path, "w") as f:
     f.write("""
@@ -287,8 +237,30 @@ def foreach_instance(metadata, output_dir, func, **kwargs):
         if res: records.append(res)
     return pd.DataFrame.from_records(records)
 """)
+
 # ==========================================
-# 3. RUN TRIPOSPLAT TOOLKIT PIPELINE (OPENGL HEADLESS)
+# PATCH build_metadata.py to load custom.py correctly
+# ==========================================
+build_meta_path = os.path.join(REPO_DIR, "dataset_toolkits/build_metadata.py")
+with open(build_meta_path, "r") as f:
+    content = f.read()
+
+old_import = '    dataset_utils = importlib.import_module(f\'datasets.{sys.argv[1]}\')'
+new_import = """    import importlib.util
+    _spec = importlib.util.spec_from_file_location("custom_ds", os.path.join(os.path.dirname(__file__), 'datasets', f'{sys.argv[1]}.py'))
+    dataset_utils = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(dataset_utils)"""
+
+if old_import in content:
+    content = content.replace(old_import, new_import)
+    with open(build_meta_path, "w") as f:
+        f.write(content)
+    print("✅ Patched build_metadata.py to use custom.py")
+else:
+    print("⚠️ build_metadata.py already patched or line not found")
+
+# ==========================================
+# 3. RUN TRIPOSPLAT TOOLKIT PIPELINE
 # ==========================================
 print(" Step 2: Rendering 150 views with OpenGL Headless (pyrender)...")
 for _, row in tqdm(df.iterrows(), total=len(df), desc="Rendering meshes"):
@@ -340,7 +312,6 @@ subprocess.run([
     "--output_dir", OUT_DIR
 ], check=True)
 df = pd.read_csv(os.path.join(OUT_DIR, "metadata.csv"))
-# ==========================================
 
 # ==========================================
 # 4. ORGANIZE CONDITIONING IMAGES
@@ -359,24 +330,19 @@ ctrl_images = {
 for _, row in tqdm(df.iterrows(), total=len(df), desc="Copying conditioning images"):
     sha = row['sha256']
     mesh_name = os.path.splitext(os.path.basename(row['local_path']))[0]
-    
-    # --- Process renders_cond (The Front View) ---
+
     render_dir = os.path.join(OUT_DIR, "renders", sha)
     transforms_path = os.path.join(render_dir, "transforms.json")
     if os.path.exists(transforms_path):
         with open(transforms_path, "r") as f:
             transforms = json.load(f)
-            
         front_idx = find_front_view(transforms)
         front_frame = transforms['frames'][front_idx]
-        
         cond_dst_dir = os.path.join(renders_cond_dir, sha, "image")
         os.makedirs(cond_dst_dir, exist_ok=True)
-        
         src_img = os.path.join(render_dir, front_frame['file_path'])
         dst_img = os.path.join(cond_dst_dir, "000.webp")
         shutil.copy(src_img, dst_img)
-        
         cond_transforms = {
             "frames": [{
                 "file_path": "image/000.webp",
@@ -388,20 +354,17 @@ for _, row in tqdm(df.iterrows(), total=len(df), desc="Copying conditioning imag
         }
         with open(os.path.join(renders_cond_dir, sha, "transforms.json"), "w") as f:
             json.dump(cond_transforms, f)
-            
-    # --- Process renders_ctrl (Your Extra Conditioning) ---
+
     if mesh_name in ctrl_images:
         ctrl_src = ctrl_images[mesh_name]
         ctrl_dst_dir = os.path.join(renders_ctrl_dir, sha, "image")
         os.makedirs(ctrl_dst_dir, exist_ok=True)
-        
         img = Image.open(ctrl_src).convert("RGBA")
         img.save(os.path.join(ctrl_dst_dir, "000.webp"), "WEBP")
-        
         ctrl_transforms = {
             "frames": [{
                 "file_path": "image/000.webp",
-                "camera_angle_x": 0.6911,  
+                "camera_angle_x": 0.6911,
                 "camera_orthographic": False,
                 "transform_matrix": [[1,0,0,0], [0,1,0,0], [0,0,1,2], [0,0,0,1]]
             }]
